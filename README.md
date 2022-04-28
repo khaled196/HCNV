@@ -14,10 +14,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## 1.  Intergrating a Copy number variant (CNV) detecting tools into Galaxy. 
 
-Although  a number of the CNV detectiong tools have been developed over the recent years (ref Khaled) only a few of them were intergated into the Galaxy
-and only couple of them are suported and functional (Khaled put tools table here).
+Although  a number of the CNV detectiong tools have been developed over the recent years [Zhao et al. (2013)](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-14-S11-S1) only a few of them were intergated into the Galaxy
+and only couple of them are suported and functional
  
-Whole exome sequning CNV detection tools according to [reference paper] 
+Whole exome sequning CNV detection tools according to [Zhao et al. (2013)](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-14-S11-S1)
 
 Tool| Reference | Ural | Availabel on tool shed    
 ----| --------- | ---- | -------------------
