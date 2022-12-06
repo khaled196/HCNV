@@ -1,0 +1,246 @@
+<tool id="CNVkit" name="Detect copy number variance" version="0.9.9" python_template_version="3.5">
+    <description>detects copy-number changes and allelic imbalances</description>
+    <macros>
+        <import>macros.xml</import>
+    </macros>
+    <expand macro="xrefs"/>
+    <expand macro="requirements"/>
+    <command detect_errors="exit_code"><![CDATA[
+        #if str($reference_source.ref_selector) == 'history':
+            ln -s '$reference_source.ref' ./genome.fa &&
+            samtools faidx ./genome.fa 2>&1 || echo 'Error running samtools faidx for indexing fasta reference for control-freec' >&2 &&
+        #else
+            ln -s '$reference_source.ref.fields.path' ./genome.fa &&
+            cp '${reference_source.ref.fields.path}.fai' ./genome.fa.fai &&
+        #end if
+        
+        
+        mkdir ./chromosomes &&
+        mkdir ./output &&
+        
+        awk -F " " '/^>/ {close(F); F="chromosomes/"substr($1,2)".fa"} {print >> F}' ./genome.fa &&
+        ln -s '$CNV_reference.input_sample_file' ./sample.bam &&
+        #if $CNV_reference.input_control_file
+            ln -s '$CNV_reference.input_control_file' ./control.bam &&
+        #end if
+        
+        #if $CNV_reference.input_targets_file
+            ln -s '$CNV_reference.input_targets_file' ./targets.bam &&
+        #end if
+        
+        #if $CNV_reference.input_reference_file
+            ln -s '$CNV_reference.input_targets_file' ./reference.cnn &&
+        #end if
+        
+        cnvkit.py batch
+            -conf '$script_file'
+            -sample ./sample.bam
+            #if $CNV_reference.input_control_file
+                -control ./control.bam
+            #end if
+            
+            #if $CNV_reference.input_targets_file
+                -targets ./targets.bam
+            #end if   ############ need to be revowd 
+            
+            #if $CNV_reference.input_reference_file
+                -targets ./reference.cnn
+            #end if   ############ need to be revowd 
+            
+        #if $output_section.scatter
+            && R -f `which makeGraph.R` '$CNV_reference.advanced_settings.scatter' 'output/sample.bam_ratio.txt'
+        #end if
+        
+        #if $output_section.diagram
+            && R -f `which makeGraph.R` '$CNV_reference.advanced_settings.diagram' 'output/sample.bam_ratio.txt'
+        #end if
+    ]]></command>
+        <configfiles>
+        <configfile name="script_file"><![CDATA[
+#import os
+#set galaxy_slots = os.getenv("GALAXY_SLOTS", 4)
+[general]
+chrFiles = chromosomes
+outputDir = output
+chrLenFile = genome.fa.fai
+maxThreads = $galaxy_slots
+
+#if $CNV_reference.advanced_settings.method == "hybrid"
+    #set $--seq-method_val = "hybrid"
+method = $method_val
+#else
+method = $CNV_reference.advanced_settings.method
+#end if
+
+#if $CNV_reference.advanced_settings.segmentmethod == "cbs"
+    #set $--segment-method_val = "cbs"
+segmentmethod = $segmentmethod_val
+#else
+segment-method = $CNV_reference.advanced_settings.segment-method
+#end if
+malereference = $CNV_reference.advanced_settings.male-reference
+countreads = $CNV_reference.advanced_settings.countreads
+droplowcoverage = $CNV_reference.advanced_settings.droplowcoverage
+###################processes = $CNV_reference.advanced_settings.processes
+###################rscriptpath = $CNV_reference.advanced_settings.rscriptpath
+short-names = $CNV_reference.advanced_settings.--short-names
+targetavgsize = $CNV_reference.advanced_settings.target-avg-size
+antitarget-avg-size = $CNV_reference.advanced_settings.antitarget-avg-size
+antitarget-min-size = $CNV_reference.advanced_settings.antitarget-min-size
+cluster = $CNV_reference.advanced_settings.--cluster
+
+#if $output_section.scatter
+scatter = TRUE
+#else
+scatter = $output_section.scatter
+#end if
+
+#if $output_section.diagram
+diagram = TRUE
+#else
+diagram = $output_section.diagram
+#end if
+
+[sample]
+bam_files = sample.bam
+inputFormat = BAM
+#####mateOrientation = $CNV_reference.mateOrientation_selector
+
+[control]
+#if $CNV_reference.input_control_file
+normal = control.bam
+inputFormat = BAM
+####mateOrientation = $CNV_reference.mateOrientation_selector
+#end if
+
+[targets]
+#if $CNV_reference.input_capture_file
+targets = capture.bed
+#end if
+
+[CopyNumberReference]
+#if $CNV_reference.input_cnv_reference_file
+reference = reference.cnn
+#end if
+
+#if int($CNV_reference.advanced_settings.window_section.window) == 0
+[antitargets]
+antitargets = antitargets.bed
+#end if
+
+#if int($no.advanced_settings.window_section.window) == 0
+[annotate]
+annotate = annotate.bed
+#end if
+
+#if int($CNV_reference.advanced_settings.window_section.window) == 0
+[access]
+access = access.bed
+#end if
+        ]]></configfile>
+    </configfiles>
+    <inputs>
+        <conditional name="CNV_reference">
+            <param name="CNV_reference_availabel" type="select" label="Select if you want to use a copy number reference file (.cnn) from your history or create a new one" help="">
+                <option value="no" selected="True">This will creat a copy number reference file using the fasta file, normal reads bam file and the targets file you provide</option>
+                <option value="yes">You have a copy number reference file in your history you want to use</option>
+            </param>
+            <when value="no">
+                <expand macro="create_CNV_reference_file" />
+                <section name="advanced_settings" title="Advanced creat CNV reference settings" expanded="false">
+                    <expand macro="advanced_no_reference" />
+                    <expand macro="shared" />
+                </section>
+            </when>
+            <when value="yes">
+                <expand macro="reuse_an_existing_cnv_reference_file" />
+                <section name="advanced_settings" title="Reuse CNV reference settings" expanded="false">
+                    <expand macro="shared" />
+                </section>
+            </when>
+        </conditional>
+        <expand macro="output_section" />
+    </inputs>
+    <outputs>
+        <data name="out_sample_bintest" format="tabular" label="${tool.name} on ${on_string}: Raw copy number profiles (sample)" from_work_dir="output/tumor.bintest.cns" />
+        <data name="out_sample_antitargetcoverage" format="cnn" label="${tool.name} on ${on_string}: Raw copy number profiles (control)" from_work_dir="output/tumor.antitargetcoverage.cnn" />
+        <data name="out_sample_call" format="tabular" label="${tool.name} on ${on_string}: Coordinates of predicted CN alterations" from_work_dir="output/tumor.call.cns" />
+        <data name="out_sample_targetcoverage_cnn" format="tabular" label="${tool.name} on ${on_string}: Information about FREEC run" from_work_dir="output/tumor.targetcoverage.cnn" />
+        <data name="out_sample_cns" format="tabular" label="${tool.name} on ${on_string}: Ratios and predicted CN alterations for each window" from_work_dir="output/tumor.cns" />
+        <data name="out_sample_cnr" format="tabular" label="${tool.name} on ${on_string}: Subclones" from_work_dir="output/tumor.cnr" />
+        <data name="out_capture_antitarget" format="bed" label="${tool.name} on ${on_string}: Ratios in BedGraph format" from_work_dir="output/capture.antitarget.bed" />
+        <data name="out_control_targetcoverage" format="tabular" label="${tool.name} on ${on_string}: Normalized CN profile" from_work_dir="output/normal.targetcoverage.cnn" />
+        <data name="out_control_antitargetcoverage" format="tabular" label="${tool.name} on ${on_string}: Normalized CN profile (log2)" from_work_dir="output/normal.antitargetcoverage.cnn" />
+        <data name="out_reference_cnn" format="tabular" label="${tool.name} on ${on_string}: GC-content profile" from_work_dir="output/reference.cnn" />
+        <data name="out_capture_target" format="bed" label="${tool.name} on ${on_string}: Circos Log2 Ratio (2D Data Track)" from_work_dir="output/capture.target.bed" />
+        <data name="out_sample_diagram_pdf" format="pdf" label="${tool.name} on ${on_string}: Circos Log2 Ratio (2D Data Track)" from_work_dir="output/tumor-diagram.pdf">
+            <filter>output_section['--diagram']</filter>
+        </data>
+        <data name="out_sample_scatter_png" format="tabular" label="${tool.name} on ${on_string}: Circos Karyotype" from_work_dir="output/tumor-scatter.png">
+            <filter>output_section['--scatter']</filter>
+        </data>
+    </outputs>
+    <tests>
+        <test expect_num_outputs="13">
+            <conditional name="CNV_reference">
+                <param name="ref_selector" value="history"/>
+                <param name="ref" ftype="fasta" value="test/genome.fasta" />
+            </conditional>
+            <param name="CNV_reference_availabel" value="no" />
+            <param name="input_sample_file" ftype="bam" value="test/tumor.bam" />
+            <param name="input_control_file" ftype="bam" value="test/normal.bam" />
+            <param name="input_targets_file" ftype="bed" value="test/capture.bed" />            
+            <param name="diagram" />
+            <param name="scatter" />
+            <output name="out_sample_bintest" file="output/tumor.bintest.cns" /> 
+            <output name="out_sample_antitargetcoverage" file="output/tumor.antitargetcoverage.cnn" /> 
+            <output name="out_sample_call" file="output/tumor.call.cns" /> 
+            <output name="out_sample_cnr" file="output/tumor.cnr" />
+            <output name="out_sample_targetcoverage" file="output/tumor.targetcoverage.cnn" /> 
+            <output name="out_sample_cns" file="output/tumor.cns" /> 
+            <output name="out_capture_antitarget" file="output/capture.antitarget.bed" /> 
+            <output name="out_control_targetcoverage" file="output/normal.targetcoverage.cnn" /> 
+            <output name="out_control_antitargetcoverage" file="output/normal.antitargetcoverage.cnn" /> 
+            <output name="out_reference_cnn" file="output/reference.cnn" /> 
+            <output name="out_capture_target" file="output/capture.target.bed" /> 
+            <output name="out_sample_diagram_pdf" file="output/tumor-diagram.pdf" /> 
+            <output name="out_sample_scatter_png" file="output/tumor-scatter.png" /> 
+        </test>
+        <test expect_num_outputs="9">
+            <conditional name="CNV_reference">
+                <param name="ref_selector" value="history"/>
+                <param name="ref" ftype="fasta" value="test/genome.fasta" />
+            </conditional>
+            <param name="CNV_reference_availabel" value="yes" />
+            <param name="input_sample_file" ftype="bam" value="test/tumor.bam" />
+            <param name="input_sample_file" ftype="cnn" value="output/reference.cnn" />         
+            <param name="diagram" />
+            <param name="scatter" />
+            <output name="out_sample_bintest" file="output/tumor.bintest.cns" /> 
+            <output name="out_sample_antitargetcoverage" file="output/tumor.antitargetcoverage.cnn" /> 
+            <output name="out_sample_call" file="output/tumor.call.cns" /> 
+            <output name="out_sample_cnr" file="output/tumor.cnr" />
+            <output name="out_sample_targetcoverage" file="output/tumor.targetcoverage.cnn" /> 
+            <output name="out_sample_cns" file="output/tumor.cns" /> 
+            <output name="out_capture_antitarget" file="output/reference.antitarget-tmp.bed" /> 
+            <output name="out_control_targetcoverage" file="output/reference.target-tmp.bed" /> 
+            <output name="out_control_antitargetcoverage" file="output/tumor.targetcoverage.cnn" /> 
+            <output name="out_sample_diagram" file="output/tumor-diagram.pdf" /> 
+            <output name="out_sample_scatter" file="output/tumor-scatter.png" />       
+        </test>
+    </tests>
+    <help><![CDATA[
+    tool id under wrapping
+    ]]></help>
+    <citations>
+        <citation type="bibtex">
+@misc{githubcnvkit,
+  author = {LastTODO, FirstTODO},
+  year = {TODO},
+  title = {cnvkit},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  url = {https://github.com/etal/cnvkit},
+}</citation>
+    </citations>
+</tool>
